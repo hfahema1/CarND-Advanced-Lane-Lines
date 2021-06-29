@@ -6,7 +6,7 @@ import cv2
 f, ((ax1, ax2, ax3),(ax4,ax5,ax6),(ax7,ax8,ax9)) = plt.subplots(3, 3, figsize=(20,10))
 
 # Read in an image, you can also try test1.jpg or test4.jpg
-img = mpimg.imread('image_sequence/frame0026.jpeg') 
+img = mpimg.imread('test_images/test1.jpg') 
 
 # Separate color space channels
 gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
@@ -31,7 +31,7 @@ s_thresh_max = 255
 r_thresh_min = 200
 r_thresh_max = 255
 
-# Sobel x on Gray and threshold x gradient and plot
+# # Sobel x on Gray and threshold x gradient and plot
 sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0) 
 abs_sobelx = np.absolute(sobelx)
 scaled_sobel = np.uint8(255*abs_sobelx/np.max(abs_sobelx))
@@ -39,6 +39,8 @@ sxbinary = np.zeros_like(scaled_sobel)
 sxbinary[(scaled_sobel >= x_thresh_min) & (scaled_sobel <= x_thresh_max)] = 1
 ax1.set_title('sxbinary')
 ax1.imshow(sxbinary)
+
+
 # Sobel x on S Channel and threshold x gradient and plot
 satsobelx = cv2.Sobel(s_channel, cv2.CV_64F, 1, 0) 
 satabs_sobelx = np.absolute(satsobelx)
@@ -55,13 +57,35 @@ redsxbinary = np.zeros_like(redscaled_sobel)
 redsxbinary[(redscaled_sobel >= x_thresh_min) & (redscaled_sobel <= x_thresh_max)] = 1
 # ax3.set_title('redsxbinary')
 # ax3.imshow(redsxbinary)
-hsv_binary = cv2.inRange(hsv, lower_white, upper_white)
-ax3.set_title('hsv_binary')
-ax3.imshow(hsv_binary)
+# hsv_binary = cv2.inRange(hsv, lower_white, upper_white)
+# ax3.set_title('hsv_binary')
+# ax3.imshow(hsv_binary)
 
-hsv_binary2 = cv2.inRange(hsv, lower_white2, upper_white2)
-ax6.set_title('hsv_binary2')
-ax6.imshow(hsv_binary2)
+# hsv_binary2 = cv2.inRange(hsv, lower_white2, upper_white2)
+# ax6.set_title('hsv_binary2')
+# ax6.imshow(hsv_binary2)
+
+#ADAPTIVE MEAN x on sat
+adaptive_blur = cv2.GaussianBlur(s_channel,(5,5),0)
+adaptive_mean = cv2.adaptiveThreshold(adaptive_blur,255,cv2.ADAPTIVE_THRESH_MEAN_C,\
+            cv2.THRESH_BINARY_INV,11,5)
+ax3.set_title('ADAPTIVE MEAN')
+ax3.imshow(adaptive_mean)
+
+#ADAPTIVE GAUS Sobel x on sat
+adaptive_gaus = cv2.adaptiveThreshold(adaptive_blur,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
+            cv2.THRESH_BINARY_INV,11,5)
+ax6.set_title('ADAPTIVE GAUSSIAN')
+ax6.imshow(adaptive_gaus)
+
+# sobelx on adaptive gaus
+adaptive_sobelx = cv2.Sobel(adaptive_gaus, cv2.CV_64F,dx = 1, dy = 0) 
+adaptiveabs_sobelx = np.absolute(adaptive_sobelx)
+adaptive_scaled_sobel = np.uint8(255*adaptiveabs_sobelx/np.max(adaptiveabs_sobelx))
+gausbinary = np.zeros_like(adaptive_scaled_sobel)
+gausbinary[(adaptive_scaled_sobel >= x_thresh_min) & (adaptive_scaled_sobel <= x_thresh_max)] = 1
+ax4.set_title('adaptive_sobelx')
+ax4.imshow(adaptive_scaled_sobel)
 
 # # Threshold S Channel and plot
 s_binary = np.zeros_like(s_channel)
@@ -69,10 +93,10 @@ s_binary[(s_channel >= s_thresh_min) & (s_channel <= s_thresh_max)] = 1
 # ax4.set_title('s_binary')
 # ax4.imshow(s_binary)
 
-# Threshold HLS space and plot
-hls_binary = cv2.inRange(hls, lower_yellow, upper_yellow)
-ax4.set_title('hls_binary')
-ax4.imshow(hls_binary)
+# # Threshold HLS space and plot
+# hls_binary = cv2.inRange(hls, lower_yellow, upper_yellow)
+# ax4.set_title('hls_binary')
+# ax4.imshow(hls_binary)
 
 # Stack thresholded sobel x on gray and thresholded saturation and plot
 color_binary = np.dstack(( np.zeros_like(sxbinary), sxbinary, s_binary)) * 255
