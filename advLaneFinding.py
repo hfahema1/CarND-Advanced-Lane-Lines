@@ -5,21 +5,20 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimage
 import pickle
 from moviepy.editor import VideoFileClip
-from IPython.display import HTML
+from moviepy.video.io.bindings import mplfig_to_npimage
 
 # --- CAMERA CALIBRATION ---
 def camera_calibration(calibrationDirectory):
+    # prepare subplot for camera calibration
+    global ax9
     # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
     objp = np.zeros((6*9,3), np.float32)
     objp[:,:2] = np.mgrid[0:9, 0:6].T.reshape(-1,2)
-
     # arrays to store object points and image points from all the images.
     objPoints = [] # 3d points in real world space
     imgPoints = [] # 2d points in image plane.
-
     # make list of calibration images and get image size
     images = glob.glob(calibrationDirectory + "cal*.jpg")
-
     # step through list and search for chessboard corners
     for idx, fileName in enumerate(images):
         img = mpimage.imread(fileName)
@@ -31,6 +30,10 @@ def camera_calibration(calibrationDirectory):
         if ret == True:
             objPoints.append(objp)
             imgPoints.append(corners)
+            if str(fileName) == 'camera_cal\calibration3.jpg':
+                cv2.drawChessboardCorners(img, (9, 6), corners, ret)
+                ax9.clear()
+                ax9.imshow(img)
     # camera calibration w/ completed object and image points
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objPoints, imgPoints, imgSize,None,None)
     # save the camera calibration result for later use
@@ -53,7 +56,6 @@ def distortion_correction(img,calibrationDirectory):
 
 # --- CREATE THRESHOLDED BINARY IMAGE W/ GRADIENTS, COLOR TRANSFORMS, ETC. ---
 def thresholds(image):
-
     # Convert image to color spaces that are useful
     hls = cv2.cvtColor(image, cv2.COLOR_RGB2HLS)
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -67,16 +69,6 @@ def thresholds(image):
     mag_thresh_max=100
     dir_thresh_min = .7
     dir_thresh_max = 1.3
-
-    # # run an adaptive thresholding on S channel
-    adaptive_blur = cv2.GaussianBlur(S,(5,5),0)
-    adaptive_gaus = cv2.adaptiveThreshold(adaptive_blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV,11,5)
-    adaptive_sobelx = cv2.Sobel(adaptive_gaus, cv2.CV_64F,dx = 1, dy = 0) 
-    adaptiveabs_sobelx = np.absolute(adaptive_sobelx)
-    adaptive_scaled_sobel = np.uint8(255*adaptiveabs_sobelx/np.max(adaptiveabs_sobelx))
-    gausbinary = np.zeros_like(adaptive_scaled_sobel)
-    gausbinary[(adaptive_scaled_sobel >= x_thresh_min) & (adaptive_scaled_sobel <= x_thresh_max)] = 1
-
     # run a Sobel x on the S value. take abs value and scale
     satSobelX = cv2.Sobel(S, cv2.CV_64F, 1, 0)
     absSatSobelX = np.absolute(satSobelX)
@@ -84,7 +76,6 @@ def thresholds(image):
     # threshold S value
     binary_sat = np.zeros_like(scaledSatSobelX)
     binary_sat[(S >= s_thresh_min) & (S <= s_thresh_max)] = 1
-    
     # run Sobel x and y on the GRAY value. take abs value
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0)
     abs_sobelx = np.absolute(sobelx)
@@ -101,70 +92,68 @@ def thresholds(image):
     # threshold direction
     binary_dir = np.zeros_like(dir_sobel)
     binary_dir[(dir_sobel >= dir_thresh_min) & (dir_sobel <= dir_thresh_max)] = 1
-    
-    # combine thresholded and masked images
+    # return combined thresholded images
     combined = np.zeros_like(binary_dir)
     combined[ (binary_sat == 1) | ((binary_mag == 1) & (binary_dir == 1)) ]= 1
-
     return combined
 
 def region_of_interest(img):
-    #defining a blank mask to start with
+    # prepare subplot for image masking
+    global ax3
+    # defining a blank mask to start with
     mask = np.zeros_like(img)   
     imgShape = img.shape
-    
-    vertices = np.array([[((.40*imgShape[1]), .68*imgShape[0]),
-                          ((.60*imgShape[1]), .68*imgShape[0]),
-                          ((.95*imgShape[1]), imgShape[0]),
-                          ((.05*imgShape[1]), imgShape[0])]],
+    vertices = np.array([[((.40*imgShape[1]), .63*imgShape[0]),
+                          ((.60*imgShape[1]), .63*imgShape[0]),
+                          ((1.0*imgShape[1]), imgShape[0]),
+                          ((.00*imgShape[1]), imgShape[0])]],
                           dtype=np.int32)
-    #defining a 3 channel to fill the mask
+    # defining single channel to fill the mask
     ignore_mask_color = (255,)
-    #filling pixels inside the polygon defined by "vertices" with the fill color    
+    # filling pixels inside the polygon defined by "vertices" with the fill color    
     cv2.fillPoly(mask, vertices, ignore_mask_color)
-    ax5.set_title("region of interest")
-    ax5.imshow(cv2.bitwise_and(img, mask))
-
+    # plot mask image
+    ax3.clear()
+    ax3.imshow(cv2.bitwise_and(img, mask))
     #returning the image only where mask pixels are nonzero
     return cv2.bitwise_and(img, mask)
 
 # --- PERSPECTIVE TRANSFORM TO "BIRDS-EYE VIEW" ---
-def warp(image):
-    shape_y = image.shape[0]
-    shape_x = image.shape[1]
-    img = region_of_interest(image)
+def warp(img):
+    shape_y = img.shape[0]
+    shape_x = img.shape[1]
     # define 4 source points 
     src = np.float32(
-        [[.4*shape_x,.68*shape_y],
-        [.6*shape_x,.68*shape_y],
+        [[.44*shape_x,.63*shape_y],
+        [.56*shape_x,.63*shape_y],
         [.95*shape_x, shape_y],
         [.05*shape_x, shape_y]])
-
-    # define 4 destination points dst = np.float32([[,],[,],[,],[,]])
+    # define 4 destination points
     dst = np.float32(
-        [[.11*shape_x,0],
-        [.89*shape_x,0],
+        [[.035*shape_x,0],
+        [.965*shape_x,0],
         [.90*shape_x,shape_y],
         [.10*shape_x,shape_y]])
-
     # use cv2.getPerspectiveTransform() to get M, the transform matrix
     M = cv2.getPerspectiveTransform(src,dst)
     # compute the inverse perspective transform
     Minv = cv2.getPerspectiveTransform(dst, src)
     # use cv2.warpPerspective() to warp your image to a top-down view
-    warped = cv2.warpPerspective(img, M, (img.shape[1],img.shape[0]), flags=cv2.INTER_LINEAR)
-    
+    warped = cv2.warpPerspective(img, M, (shape_x,shape_y), flags=cv2.INTER_LINEAR)
+    # return warped image and inverse matrix
     return warped, Minv
 
 # --- DETECT LANE PIXELS AND FIT TO FIND THE LANE BOUNDARY ---
-def search_around_poly(binary_warped):
-    print('inside poly search')
+def search_poly(binary_warped):
+    # prepare subplot for polynomial search
+    global ax7
+    # create image to visualize result
+    out_img = np.dstack((binary_warped, binary_warped, binary_warped))
     # Set margin and grab activated pixels
     margin = 50
     nonzero = binary_warped.nonzero()
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
-    
     # Set the area of search based on activated x-values ###
     left_lane_inds = ( ( nonzerox > (lLine.bestx[0] *(nonzeroy**2) + 
                                      lLine.bestx[1] * nonzeroy + 
@@ -178,17 +167,40 @@ def search_around_poly(binary_warped):
                        ( nonzerox < (rLine.bestx[0]*(nonzeroy**2) +
                                      rLine.bestx[1]*nonzeroy +
                                      rLine.bestx[2] + margin)))
-    
-    # Again, extract left and right line pixel positions
+    # extract left and right line pixel positions and return them
     leftx = nonzerox[left_lane_inds]
     lefty = nonzeroy[left_lane_inds] 
     rightx = nonzerox[right_lane_inds]
     righty = nonzeroy[right_lane_inds]
-
+    ## Visualization ##
+    # Create an image to draw on and an image to show the selection window
+    out_img = np.dstack((binary_warped, binary_warped, binary_warped))*255
+    window_img = np.zeros_like(out_img)
+    # Color in left and right line pixels
+    out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
+    out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
+    # Generate a polygon to illustrate the search window area
+    # And recast the x and y points into usable format for cv2.fillPoly()
+    left_line_window1 = np.array([np.transpose(np.vstack([lLine.recent_xfitted-margin, lLine.recent_yfitted]))])
+    left_line_window2 = np.array([np.flipud(np.transpose(np.vstack([lLine.recent_xfitted+margin, 
+                              lLine.recent_yfitted])))])
+    left_line_pts = np.hstack((left_line_window1, left_line_window2))
+    right_line_window1 = np.array([np.transpose(np.vstack([rLine.recent_xfitted-margin, rLine.recent_yfitted]))])
+    right_line_window2 = np.array([np.flipud(np.transpose(np.vstack([rLine.recent_xfitted+margin, 
+                              rLine.recent_yfitted])))])
+    right_line_pts = np.hstack((right_line_window1, right_line_window2))
+    # Draw the lane onto the warped blank image
+    cv2.fillPoly(window_img, np.int_([left_line_pts]), (0,255, 0))
+    cv2.fillPoly(window_img, np.int_([right_line_pts]), (0,255, 0))
+    cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
+    # plot image onto subplot
+    ax7.clear()
+    ax7.imshow(out_img)
     return leftx, lefty, rightx, righty
 
-def find_lane_pixels(binary_warped):
-    print('inside window search')
+def search_windows(binary_warped):
+    # prepare subplot to show image
+    global ax6
     # histogram of the bottom half of the image
     histogram = np.sum(binary_warped[binary_warped.shape[0]//2:,:], axis=0)
     # create image to visualize result
@@ -199,7 +211,7 @@ def find_lane_pixels(binary_warped):
     rightx_base = np.argmax(histogram[midpoint:]) + midpoint
     # number of sliding windows, width of the windows +/- margin, minimum number of pixels found to recenter window
     nwindows = 9
-    margin = 50
+    margin = 75
     minpix = 50
     # height of windows based on nwindows and image shape
     window_height = int(binary_warped.shape[0]//nwindows)
@@ -213,7 +225,6 @@ def find_lane_pixels(binary_warped):
     # empty lists to receive left and right lane pixel indices
     left_lane_inds = []
     right_lane_inds = []
-
     # Step through the windows one by one
     for window in range(nwindows):
         # Identify window boundaries in x and y (and right and left)
@@ -242,7 +253,6 @@ def find_lane_pixels(binary_warped):
             leftx_current = int(np.mean(nonzerox[good_left_inds]))
         if len(good_right_inds) > minpix:        
             rightx_current = int(np.mean(nonzerox[good_right_inds]))
-
     # concatenate the arrays of indices (previously was a list of lists of pixels)
     try:
         left_lane_inds = np.concatenate(left_lane_inds)
@@ -250,49 +260,42 @@ def find_lane_pixels(binary_warped):
     except ValueError:
         # Avoids an error
         pass
-
-    # Extract left and right line pixel positions
+    # extract left and right line pixel positions and return them
     leftx = nonzerox[left_lane_inds]
     lefty = nonzeroy[left_lane_inds] 
     rightx = nonzerox[right_lane_inds]
     righty = nonzeroy[right_lane_inds]
-
     ## Visualization ##
     # Colors in the left and right lane regions
     out_img[lefty, leftx] = [255, 0, 0]
     out_img[righty, rightx] = [0, 0, 255]
-    # --- DEBUG PLOTS ---
-    # Draw the windows on the visualization image
-    ax6.set_title("Windows")
+    # plot image on subplot
+    ax6.clear()
     ax6.imshow(out_img)
 
     return leftx, lefty, rightx, righty
 
 # --- DETERMINE CURVATURE OF THE LANE AND VEHICLE POSITION WRT CENTER ---
 def measure_curvature_real(leftx, lefty, rightx, righty):
-
     # Define conversions in x and y from pixels space to meters
     ym_per_pix = 30/720 # meters per pixel in y dimension
     xm_per_pix = 3.7/860 # meters per pixel in x dimension
-
     # reverse to match top-to-bottom in y
     leftx = leftx[::-1]  # Reverse to match top-to-bottom in y
     rightx = rightx[::-1]  # Reverse to match top-to-bottom in y
     left_fit_cr = np.polyfit(lefty*ym_per_pix, leftx*xm_per_pix, 2)
     right_fit_cr = np.polyfit(righty*ym_per_pix, rightx*xm_per_pix, 2)
-        
     # measure curavture from image bottom
     y_eval = np.max(righty)*ym_per_pix
-
     # subtract image midpoint from polynomials' midpoint for distance from center
     delta_center = ((rightx[-1]+leftx[-1])/2) - (1280/2)
     delta_center = delta_center*xm_per_pix
     # implement the calculation of R_curve (radius of curvature) #####
     left_curverad = ((1+(2*left_fit_cr[0]*y_eval+left_fit_cr[1])**2)**(1.5)) \
-                    /(2.0*np.absolute(left_fit_cr[0]))  ## Implement the calculation of the left line here
+                    /(2.0*np.absolute(left_fit_cr[0]))
     right_curverad = ((1+(2.0*right_fit_cr[0]*y_eval+right_fit_cr[1])**2)**(1.5)) \
-                    /(2.0*np.absolute(right_fit_cr[0]))  ## Implement the calculation of the right line here
-    
+                    /(2.0*np.absolute(right_fit_cr[0]))
+    # return measurements
     return left_curverad, right_curverad, delta_center
 
 # --- WARP THE DETECED LANE BOUNDARIES BACK ONTO THE ORIGINAL IMAGE ---
@@ -319,6 +322,7 @@ def write_img_data(img2write,left_curverad, right_curverad, delta_center):
     fontScale              = 1
     fontColor              = (255,255,255)
     lineType               = 2
+    # write left line data onto image
     cv2.putText(img2write,
         'L Curve Rad = {curve:.2f}m'.format(curve = left_curverad), 
         (600,30), 
@@ -326,6 +330,7 @@ def write_img_data(img2write,left_curverad, right_curverad, delta_center):
         fontScale,
         fontColor,
         lineType)
+    # write right line data onto image
     cv2.putText(img2write,
         'R Curve Rad = {curve:.2f}m'.format(curve = right_curverad), 
         (600,60), 
@@ -333,6 +338,7 @@ def write_img_data(img2write,left_curverad, right_curverad, delta_center):
         fontScale,
         fontColor,
         lineType)
+    # write center position data onto image
     cv2.putText(img2write,
         'Off Center = {center:.2f}m'.format(center = delta_center), 
         (600,90), 
@@ -340,20 +346,23 @@ def write_img_data(img2write,left_curverad, right_curverad, delta_center):
         fontScale,
         fontColor,
         lineType)
-
     return img2write
 
 # --- LINE CLASS ---
 class Line():
-    def __init__(self):
+    def __init__(self, name):
+        # name of line used for debugging
+        self.name = name
         # was the line detected in the last iteration?
         self.detected = False  
         # x values of the last n fits of the line
         self.recent_xfitted = None
+        #difference in fit coefficients between last and new fits
+        self.diffs = np.array([0,0,0], dtype='float') 
         # y values of the last n fits of the line
         self.recent_yfitted = None
         #x values of average polynomial coeffs fitted line over the last n iterations
-        self.bestx = None     
+        self.bestx = np.array([0,0,0], dtype='float')     
         #polynomial coefficients of the last n iterations
         self.best_fit = [np.array([False])]
         #polynomial coefficients for the most recent fit
@@ -366,7 +375,6 @@ class Line():
         self.ally = None
         # position at base of image
         self.base = None
-
     # assign detected pixels to lane object and assign y values for fit line
     # run a fit and check for line detection
     def set_pixels(self,x,y,img_shape):
@@ -375,80 +383,115 @@ class Line():
         self.recent_yfitted = np.linspace(0, img_shape[0]-1, img_shape[0])
         self.set_detected()
         self.set_current_fit()
-
     # set if number of pixels detected is greater than 50
     def set_detected(self):
-        print('self.allx = ', len(self.allx))
-        self.detected = len(self.allx)>10000
-        print('len(self.allx)',len(self.allx))
-        print(self.detected) 
-
+        margin = 5000
+        self.detected = len(self.allx) > margin
     # get poly coeffs from x and y pixels. 
     # add coeffs to list
     def set_current_fit(self):
         self.current_fit = np.polyfit(self.ally,self.allx,2)
+        #self.check_diffs()
         self.add_best_fit()
-
-    # add poly coeffs to list of coeffs and delete oldest set if list > 5.
-    # run the averager
+    # set difference from current coeffs to past coeffs (NOT USED)
+    def check_diffs(self):
+        self.diffs = self.current_fit - self.bestx
+        if (self.bestx[0] != 0):
+            coef0_delta = self.current_fit[0]/self.bestx[0]
+            coef1_delta = self.current_fit[1]/self.bestx[1]
+            coef2_delta = self.current_fit[2]/self.bestx[2]
+            if coef0_delta > 5:
+                self.current_fit[0] = 5.*self.bestx[0]
+            elif coef0_delta < -5:
+                self.current_fit[0] = -5.*self.bestx[0]
+            if coef1_delta > 2:
+                self.current_fit[1] = 2.*self.bestx[1]
+            elif coef1_delta < -5:
+                self.current_fit[1] = -2.*self.bestx[1]
+            if coef2_delta > 1.001:
+                self.current_fit[2] = 1.001*self.bestx[2]
+            elif coef2_delta < -1.001:
+                self.current_fit[2] = -1.001*self.bestx[2]
+    # append to size limited best_fit list of coeffs
+    # and run averager
     def add_best_fit(self):
-        print('1.', self.best_fit)
+        set_length = 10
         if (self.best_fit[0].any() == False):
             self.best_fit = [self.current_fit]
         else:
-            print('2', self.current_fit)
             self.best_fit = np.append(self.best_fit,[self.current_fit],axis=0)
-            print('3.',self.best_fit)
-            if (self.best_fit.shape[0] > 10):
+            if (self.best_fit.shape[0] > set_length):
                 self.best_fit = np.delete(self.best_fit,0,0)
-                print('4.',self.best_fit)
         self.set_bestx()
-
-    # take average of last 5 coeffs
-    # run a fitted line averaged coeffs
+    # take average best_fit coeffs
+    # and run a fitted line
     def set_bestx(self):
         self.bestx = np.mean(self.best_fit,axis=0)
-        print('5.',self.bestx)
         self.set_recent_xfitted()
-
-    # use lin space from img size and average coeffs to product plot lines 
+    # use stored lin space (from img size) and average coeffs to product lines 
+    # clip to image boundary
     def set_recent_xfitted(self):
         self.recent_xfitted = self.bestx[0]*self.recent_yfitted**2 \
                             + self.bestx[1]*self.recent_yfitted \
                             + self.bestx[2]
         self.recent_xfitted = np.clip(self.recent_xfitted, a_min = 0, a_max = 1279)        
 
+# --- PROCESS PLOTS ---
+def process_plotting(thresholded, top_down, img_with_data, undist):
+    global f, ax1, ax2, ax3, ax4, ax5, ax6, ax7, ax8, ax9
+    ax1.clear()
+    ax1.set_title('undist')
+    ax1.imshow(undist)
+    ax2.clear()
+    ax2.set_title('thresholded')
+    ax2.imshow(thresholded)
+    ax3.set_title("region of interest")
+    ax4.clear()
+    ax4.set_title('top_down')
+    ax4.imshow(top_down)
+    ax5.clear()
+    ax5.set_title('top_down w/ poly')
+    ax5.imshow(top_down)
+    ax5.plot(lLine.recent_xfitted,lLine.recent_yfitted, color = 'red')
+    ax5.plot(rLine.recent_xfitted,rLine.recent_yfitted, color = 'red')
+    ax6.set_title("Search Windows")
+    ax7.set_title("Search Poly")
+    ax8.clear()
+    ax8.set_title('img_with_data')
+    ax8.imshow(img_with_data)
+    ax9.set_title('camera calibration')
+    plt.show()
+    # return figure with all subplots
+    return f
+
 # --- PIPELINE ---
-# compute the camera calibration matrix and distortion 
-#           coefficients given a set of chessboard images.
+# prepare plots to display image process
+f, ((ax1, ax2, ax3),(ax4, ax5, ax6),(ax7, ax8, ax9)) = plt.subplots(3, 3, figsize=(24, 9))
+# compute the camera calibration matrix and distortion coefficients given a set of chessboard images.
 camera_calibration('camera_cal/')
-
 # instantiate line classes for left and right lines
-rLine = Line()
-lLine = Line()
-
-f, ((ax1, ax2, ax3),(ax4,ax5,ax6),(ax7,ax8,ax9)) = plt.subplots(3, 3, figsize=(20,10))
+rLine = Line('right')
+lLine = Line('left')
+# run pipeline
 def process_image(image):
-     # distortion correction to raw images.
+    # figure for plotting process
+    global f
+    # distortion correction to raw images.
     undist = distortion_correction(image,'camera_cal/')
     # color transforms, gradients, etc., to create a thresholded binary image.
     thresholded = thresholds(undist)
+    # mask the image and retain only lane area
+    masked = region_of_interest(thresholded)
     # perspective transform to rectify binary image
-    top_down, Minv = warp(thresholded)
-    # detect lane pixels. Find pixels if last detection failed
-    print("is either line detection false?")
-    print((rLine.detected == False) or (rLine.detected == False))
-    if ((rLine.detected == False) or (rLine.detected == False)):
-        print("running window search")
-        left_x, left_y, right_x, right_y = find_lane_pixels(top_down)
-    else:
-        print("running poly search")
-        left_x, left_y, right_x, right_y = search_around_poly(top_down)
-
+    top_down, Minv = warp(masked)
+    # Detect lane pixels. Find pixels with polynomial if last attempt succeeded
+    if (rLine.detected and lLine.detected) :
+        left_x, left_y, right_x, right_y = search_poly(top_down)
+    else :
+        left_x, left_y, right_x, right_y = search_windows(top_down)
     # assign lane pixels to lane objects and find lane boundaryies
     lLine.set_pixels(left_x, left_y, top_down.shape)
     rLine.set_pixels(right_x, right_y, top_down.shape)
-
     # Determine the curvature of the lane and vehicle position with respect to center.
     lLine.radius_of_curvature, rLine.radius_of_curvature, delta_center = measure_curvature_real(lLine.allx, lLine.ally, rLine.allx, rLine.ally)
     # Warp the detected lane boundaries back onto the original image.
@@ -456,37 +499,21 @@ def process_image(image):
     # write curvature data onto image
     img_with_data = write_img_data(img_with_lanes, lLine.radius_of_curvature, rLine.radius_of_curvature, delta_center)
     
-    # --- DEBUG SUBPLOTTING ---
-    ax1.set_title('thresholded')
-    ax1.imshow(thresholded)
-    ax2.set_title('top_down')
-    ax2.imshow(top_down)
-    ax3.set_title('img_with_lanes')
-    ax3.imshow(img_with_lanes)
-    ax4.set_title('top_down w/ poly')
-    ax4.imshow(top_down)
-    lslope_str = 'L Slope = {slope:.2f}'.format(slope = (lLine.recent_xfitted[0]-lLine.recent_xfitted[-1]) / 
-                                (lLine.recent_yfitted[0]-lLine.recent_yfitted[-1]))
-    rslope_str = 'R Slope = {slope:.2f}'.format(slope = (rLine.recent_xfitted[0]-rLine.recent_xfitted[-1]) / 
-                                (rLine.recent_yfitted[0]-rLine.recent_yfitted[-1]))
-    ax4.text(0,40,lslope_str,color='white')
-    ax4.text(0,80,rslope_str,color='white')
-    ax4.plot(lLine.recent_xfitted,lLine.recent_yfitted, color = 'red')
-    ax4.plot(rLine.recent_xfitted,rLine.recent_yfitted, color = 'red')
-    plt.show()
-    
-
-    
+    # --- PROCESS PLOTS (UNCOMMENT TO USE)---
+    process_plotting(thresholded, top_down, img_with_data, undist)
+    # return the processed image
     return img_with_data
+    # return subplots as image. comment out the above return to use
+    # takes a VERY long time
+    return mplfig_to_npimage(f)
 
 #--- LET'S MAKE A VIDEO ---
-project_output = 'project_video_OutputSubclip.mp4'
-clip1 = VideoFileClip("project_video.mp4")#.subclip(30.00,33.00)
-project_clip = clip1.fl_image(process_image)
-#clip1.write_images_sequence('image_sequence/frame%04d.jpeg',verbose = False)
-project_clip.write_videofile(project_output, audio=False)
+# project_output = 'project_video_Output.mp4'
+# clip1 = VideoFileClip("project_video.mp4")#.subclip(38.00,42.00)
+# project_clip = clip1.fl_image(process_image)
+# #clip1.write_images_sequence('image_sequence/frame%04d.jpeg',verbose = False)
+# project_clip.write_videofile(project_output, audio=False)
 
-
-# # # -- TEST WITH IMAGE --
-test_pic = mpimage.imread('image_sequence/frame0074.jpeg')
+# -- TEST WITH IMAGE --
+test_pic = mpimage.imread('test_images/straight_lines1.jpg')
 processed_image = process_image(test_pic)
